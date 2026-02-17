@@ -46,7 +46,6 @@ export async function POST(request: NextRequest) {
       documentName,
       hasPages,
       ownerId,
-      dataroomVerified,
       linkType,
       dataroomViewId,
       viewType,
@@ -61,7 +60,6 @@ export async function POST(request: NextRequest) {
       documentName: string | undefined;
       hasPages: boolean | undefined;
       ownerId: string | null;
-      dataroomVerified: boolean | undefined;
       linkType: string;
       dataroomViewId?: string;
       viewType: "DATAROOM_VIEW" | "DOCUMENT_VIEW";
@@ -216,7 +214,6 @@ export async function POST(request: NextRequest) {
         linkId,
       );
 
-      console.log("previewSession", previewSession);
       if (!previewSession) {
         return NextResponse.json(
           {
@@ -236,6 +233,7 @@ export async function POST(request: NextRequest) {
         linkId,
         link.dataroomId!,
       );
+
 
       // If we have a dataroom session, use its verified status
       if (dataroomSession) {
@@ -397,7 +395,7 @@ export async function POST(request: NextRequest) {
       // Request OTP Code for email verification if
       // 1) email verification is required and
       // 2) code is not provided or token not provided
-      if (link.emailAuthenticated && !code && !token && !dataroomVerified) {
+      if (link.emailAuthenticated && !code && !token) {
         const ipAddressValue = ipAddress(request);
 
         // Rate limit per email/link combination (1 per 30 seconds) to prevent OTP flooding
@@ -453,7 +451,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      if (link.emailAuthenticated && code && !dataroomVerified) {
+      if (link.emailAuthenticated && code) {
         const ipAddressValue = ipAddress(request);
         const { success } = await ratelimit(10, "1 m").limit(
           `verify-otp:${ipAddressValue}`,
@@ -522,7 +520,7 @@ export async function POST(request: NextRequest) {
         isEmailVerified = true;
       }
 
-      if (link.emailAuthenticated && token && !dataroomVerified) {
+      if (link.emailAuthenticated && token) {
         const ipAddressValue = ipAddress(request);
         const { success } = await ratelimit(10, "1 m").limit(
           `verify-email:${ipAddressValue}`,
@@ -572,9 +570,6 @@ export async function POST(request: NextRequest) {
         isEmailVerified = true;
       }
 
-      if (link.emailAuthenticated && dataroomVerified) {
-        isEmailVerified = true;
-      }
     }
 
     let viewer: { id: string; email: string; verified: boolean } | null = null;
@@ -669,7 +664,6 @@ export async function POST(request: NextRequest) {
 
     // ** DATAROOM_VIEW **
     if (viewType === "DATAROOM_VIEW") {
-      console.log("viewType is DATAROOM_VIEW");
       try {
         let newDataroomView: { id: string } | null = null;
         if (!isPreview) {
@@ -692,7 +686,7 @@ export async function POST(request: NextRequest) {
               clickId: newId("linkView"),
               viewId: newDataroomView.id,
               linkId,
-              dataroomId,
+              dataroomId: link.dataroomId!,
               teamId: link.teamId!,
               enableNotification: link.enableNotification,
               isPaused,
@@ -705,7 +699,7 @@ export async function POST(request: NextRequest) {
                 try {
                   await notifyDataroomAccess({
                     teamId: link.teamId!,
-                    dataroomId,
+                    dataroomId: link.dataroomId!,
                     linkId,
                     viewerEmail: verifiedEmail ?? email,
                     viewerId: viewer?.id,
@@ -743,7 +737,7 @@ export async function POST(request: NextRequest) {
         // Create a dataroom session token if a dataroom session doesn't exist yet
         if (!dataroomSession && !isPreview) {
           const newDataroomSession = await createDataroomSession(
-            dataroomId,
+            link.dataroomId!,
             linkId,
             newDataroomView?.id!,
             ipAddress(request) ?? LOCALHOST_IP,
@@ -796,9 +790,6 @@ export async function POST(request: NextRequest) {
 
         // if dataroomSession is not present, create a dataroom view first
         if (!dataroomSession) {
-          console.log(
-            "no dataroom session present, creating new dataroom view",
-          );
           dataroomView = await prisma.view.create({
             data: { ...viewFields, viewType: "DATAROOM_VIEW" },
             select: { id: true },
@@ -811,7 +802,7 @@ export async function POST(request: NextRequest) {
               clickId: newId("linkView"),
               viewId: dataroomView.id,
               linkId,
-              dataroomId,
+              dataroomId: link.dataroomId!,
               teamId: link.teamId!,
               enableNotification: link.enableNotification,
               isPaused,
@@ -839,7 +830,7 @@ export async function POST(request: NextRequest) {
                 await notifyDocumentView({
                   teamId: link.teamId!,
                   documentId,
-                  dataroomId,
+                  dataroomId: link.dataroomId!,
                   linkId,
                   viewerEmail: verifiedEmail ?? email,
                   viewerId: viewer?.id,
@@ -955,12 +946,12 @@ export async function POST(request: NextRequest) {
           link.permissionGroupId) &&
         effectiveGroupId &&
         documentId &&
-        dataroomId
+        link.dataroomId
       ) {
         const dataroomDocument = await prisma.dataroomDocument.findUnique({
           where: {
             dataroomId_documentId: {
-              dataroomId: dataroomId,
+              dataroomId: link.dataroomId,
               documentId: documentId,
             },
           },
@@ -1060,7 +1051,7 @@ export async function POST(request: NextRequest) {
       // Create a dataroom session token if a dataroom session doesn't exist yet
       if (!dataroomSession && !isPreview) {
         const newDataroomSession = await createDataroomSession(
-          dataroomId,
+          link.dataroomId!,
           linkId,
           dataroomView?.id!,
           ipAddress(request) ?? LOCALHOST_IP,
